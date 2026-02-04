@@ -3,13 +3,14 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/CSCSoftware/wahoo/db"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// registerTools registers all 12 WhatsApp MCP tools.
+// registerTools registers all 19 WhatsApp MCP tools.
 func (s *Server) registerTools() {
 	// === Read-only DB tools (no WhatsApp client needed) ===
 
@@ -74,6 +75,53 @@ func (s *Server) registerTools() {
 		Name:        "download_media",
 		Description: "Download media from a WhatsApp message and get the local file path.",
 	}, s.handleDownloadMedia)
+
+	// === Chat management tools ===
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "revoke_message",
+		Description: "Delete/revoke a WhatsApp message. Can revoke own messages or others' messages as group admin.",
+	}, s.handleRevokeMessage)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "block_contact",
+		Description: "Block a WhatsApp contact.",
+	}, s.handleBlockContact)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "unblock_contact",
+		Description: "Unblock a previously blocked WhatsApp contact.",
+	}, s.handleUnblockContact)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "get_blocklist",
+		Description: "Get the list of all blocked WhatsApp contacts.",
+	}, s.handleGetBlocklist)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "mute_chat",
+		Description: "Mute or unmute a WhatsApp chat. Duration in hours, 0 = mute forever.",
+	}, s.handleMuteChat)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "pin_chat",
+		Description: "Pin or unpin a WhatsApp chat.",
+	}, s.handlePinChat)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "archive_chat",
+		Description: "Archive or unarchive a WhatsApp chat.",
+	}, s.handleArchiveChat)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "delete_chat",
+		Description: "Delete a WhatsApp chat entirely (removes from WhatsApp and local DB).",
+	}, s.handleDeleteChat)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "mark_chat_read",
+		Description: "Mark a WhatsApp chat as read or unread.",
+	}, s.handleMarkChatRead)
 }
 
 // --- Input types ---
@@ -146,6 +194,47 @@ type sendAudioMessageInput struct {
 type downloadMediaInput struct {
 	MessageID string `json:"message_id" jsonschema:"ID of the message containing the media"`
 	ChatJID   string `json:"chat_jid" jsonschema:"JID of the chat containing the message"`
+}
+
+type revokeMessageInput struct {
+	ChatJID   string `json:"chat_jid" jsonschema:"JID of the chat containing the message"`
+	MessageID string `json:"message_id" jsonschema:"ID of the message to revoke/delete"`
+	SenderJID string `json:"sender_jid,omitempty" jsonschema:"Sender JID (only needed to revoke others messages as group admin)"`
+}
+
+type blockContactInput struct {
+	JID string `json:"jid" jsonschema:"JID of the contact to block (e.g. 491234567890@s.whatsapp.net)"`
+}
+
+type unblockContactInput struct {
+	JID string `json:"jid" jsonschema:"JID of the contact to unblock"`
+}
+
+type emptyInput struct{}
+
+type muteChatInput struct {
+	ChatJID       string `json:"chat_jid" jsonschema:"JID of the chat to mute/unmute"`
+	Mute          bool   `json:"mute" jsonschema:"true to mute, false to unmute"`
+	DurationHours int    `json:"duration_hours,omitempty" jsonschema:"Mute duration in hours (0 = forever, only used when mute=true)"`
+}
+
+type pinChatInput struct {
+	ChatJID string `json:"chat_jid" jsonschema:"JID of the chat to pin/unpin"`
+	Pin     bool   `json:"pin" jsonschema:"true to pin, false to unpin"`
+}
+
+type archiveChatInput struct {
+	ChatJID string `json:"chat_jid" jsonschema:"JID of the chat to archive/unarchive"`
+	Archive bool   `json:"archive" jsonschema:"true to archive, false to unarchive"`
+}
+
+type deleteChatInput struct {
+	ChatJID string `json:"chat_jid" jsonschema:"JID of the chat to delete"`
+}
+
+type markChatReadInput struct {
+	ChatJID string `json:"chat_jid" jsonschema:"JID of the chat to mark"`
+	Read    bool   `json:"read" jsonschema:"true to mark as read, false to mark as unread"`
 }
 
 // --- Handlers ---
@@ -319,4 +408,94 @@ func (s *Server) handleDownloadMedia(ctx context.Context, req *mcp.CallToolReque
 		return nil, downloadResult{Success: false, Message: err.Error()}, nil
 	}
 	return nil, downloadResult{Success: true, Message: "Media downloaded successfully", FilePath: path}, nil
+}
+
+// --- Chat management handlers ---
+
+func (s *Server) handleRevokeMessage(ctx context.Context, req *mcp.CallToolRequest, input revokeMessageInput) (*mcp.CallToolResult, sendResult, error) {
+	if s.client == nil {
+		return nil, sendResult{Success: false, Message: "WhatsApp client not available"}, nil
+	}
+	success, msg := s.client.RevokeMessage(input.ChatJID, input.MessageID, input.SenderJID)
+	return nil, sendResult{Success: success, Message: msg}, nil
+}
+
+func (s *Server) handleBlockContact(ctx context.Context, req *mcp.CallToolRequest, input blockContactInput) (*mcp.CallToolResult, sendResult, error) {
+	if s.client == nil {
+		return nil, sendResult{Success: false, Message: "WhatsApp client not available"}, nil
+	}
+	success, msg := s.client.BlockContact(input.JID)
+	return nil, sendResult{Success: success, Message: msg}, nil
+}
+
+func (s *Server) handleUnblockContact(ctx context.Context, req *mcp.CallToolRequest, input unblockContactInput) (*mcp.CallToolResult, sendResult, error) {
+	if s.client == nil {
+		return nil, sendResult{Success: false, Message: "WhatsApp client not available"}, nil
+	}
+	success, msg := s.client.UnblockContact(input.JID)
+	return nil, sendResult{Success: success, Message: msg}, nil
+}
+
+type blocklistResult struct {
+	BlockedJIDs []string `json:"blocked_jids"`
+	Count       int      `json:"count"`
+}
+
+func (s *Server) handleGetBlocklist(ctx context.Context, req *mcp.CallToolRequest, input emptyInput) (*mcp.CallToolResult, blocklistResult, error) {
+	if s.client == nil {
+		return nil, blocklistResult{}, fmt.Errorf("WhatsApp client not available")
+	}
+	jids, err := s.client.GetBlocklist()
+	if err != nil {
+		return nil, blocklistResult{}, err
+	}
+	if jids == nil {
+		jids = []string{}
+	}
+	return nil, blocklistResult{BlockedJIDs: jids, Count: len(jids)}, nil
+}
+
+func (s *Server) handleMuteChat(ctx context.Context, req *mcp.CallToolRequest, input muteChatInput) (*mcp.CallToolResult, sendResult, error) {
+	if s.client == nil {
+		return nil, sendResult{Success: false, Message: "WhatsApp client not available"}, nil
+	}
+	if !input.Mute {
+		success, msg := s.client.UnmuteChat(input.ChatJID)
+		return nil, sendResult{Success: success, Message: msg}, nil
+	}
+	duration := time.Duration(input.DurationHours) * time.Hour
+	success, msg := s.client.MuteChat(input.ChatJID, duration)
+	return nil, sendResult{Success: success, Message: msg}, nil
+}
+
+func (s *Server) handlePinChat(ctx context.Context, req *mcp.CallToolRequest, input pinChatInput) (*mcp.CallToolResult, sendResult, error) {
+	if s.client == nil {
+		return nil, sendResult{Success: false, Message: "WhatsApp client not available"}, nil
+	}
+	success, msg := s.client.PinChat(input.ChatJID, input.Pin)
+	return nil, sendResult{Success: success, Message: msg}, nil
+}
+
+func (s *Server) handleArchiveChat(ctx context.Context, req *mcp.CallToolRequest, input archiveChatInput) (*mcp.CallToolResult, sendResult, error) {
+	if s.client == nil {
+		return nil, sendResult{Success: false, Message: "WhatsApp client not available"}, nil
+	}
+	success, msg := s.client.ArchiveChat(input.ChatJID, input.Archive)
+	return nil, sendResult{Success: success, Message: msg}, nil
+}
+
+func (s *Server) handleDeleteChat(ctx context.Context, req *mcp.CallToolRequest, input deleteChatInput) (*mcp.CallToolResult, sendResult, error) {
+	if s.client == nil {
+		return nil, sendResult{Success: false, Message: "WhatsApp client not available"}, nil
+	}
+	success, msg := s.client.DeleteChat(input.ChatJID)
+	return nil, sendResult{Success: success, Message: msg}, nil
+}
+
+func (s *Server) handleMarkChatRead(ctx context.Context, req *mcp.CallToolRequest, input markChatReadInput) (*mcp.CallToolResult, sendResult, error) {
+	if s.client == nil {
+		return nil, sendResult{Success: false, Message: "WhatsApp client not available"}, nil
+	}
+	success, msg := s.client.MarkChatAsRead(input.ChatJID, input.Read)
+	return nil, sendResult{Success: success, Message: msg}, nil
 }
