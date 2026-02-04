@@ -237,17 +237,49 @@ type markChatReadInput struct {
 	Read    bool   `json:"read" jsonschema:"true to mark as read, false to mark as unread"`
 }
 
-// --- Handlers ---
+// --- Output wrapper types (MCP SDK requires type "object", not slices/pointers) ---
 
-func (s *Server) handleSearchContacts(ctx context.Context, req *mcp.CallToolRequest, input searchContactsInput) (*mcp.CallToolResult, []db.ContactDict, error) {
-	result, err := s.store.SearchContacts(input.Query)
-	if err != nil {
-		return nil, nil, err
-	}
-	return nil, result, nil
+type contactsResult struct {
+	Contacts []db.ContactDict `json:"contacts"`
+	Count    int              `json:"count"`
 }
 
-func (s *Server) handleListMessages(ctx context.Context, req *mcp.CallToolRequest, input listMessagesInput) (*mcp.CallToolResult, []db.MessageDict, error) {
+type messagesResult struct {
+	Messages []db.MessageDict `json:"messages"`
+	Count    int              `json:"count"`
+}
+
+type chatsResult struct {
+	Chats []db.ChatDict `json:"chats"`
+	Count int           `json:"count"`
+}
+
+type chatResult struct {
+	Chat db.ChatDict `json:"chat"`
+}
+
+type messageResult struct {
+	Message db.MessageDict `json:"message"`
+}
+
+type messageContextResult struct {
+	Context db.MessageContextDict `json:"context"`
+}
+
+// --- Handlers ---
+
+func (s *Server) handleSearchContacts(ctx context.Context, req *mcp.CallToolRequest, input searchContactsInput) (*mcp.CallToolResult, contactsResult, error) {
+	result, err := s.store.SearchContacts(input.Query)
+	if err != nil {
+		return nil, contactsResult{}, err
+	}
+	if result == nil {
+		result = []db.ContactDict{}
+	}
+	return nil, contactsResult{Contacts: result, Count: len(result)}, nil
+}
+
+func (s *Server) handleListMessages(ctx context.Context, req *mcp.CallToolRequest, input listMessagesInput) (*mcp.CallToolResult, messagesResult, error) {
 	opts := db.ListMessagesOpts{
 		Limit:          input.Limit,
 		Page:           input.Page,
@@ -276,12 +308,15 @@ func (s *Server) handleListMessages(ctx context.Context, req *mcp.CallToolReques
 
 	result, err := s.store.ListMessages(opts)
 	if err != nil {
-		return nil, nil, err
+		return nil, messagesResult{}, err
 	}
-	return nil, result, nil
+	if result == nil {
+		result = []db.MessageDict{}
+	}
+	return nil, messagesResult{Messages: result, Count: len(result)}, nil
 }
 
-func (s *Server) handleListChats(ctx context.Context, req *mcp.CallToolRequest, input listChatsInput) (*mcp.CallToolResult, []db.ChatDict, error) {
+func (s *Server) handleListChats(ctx context.Context, req *mcp.CallToolRequest, input listChatsInput) (*mcp.CallToolResult, chatsResult, error) {
 	opts := db.ListChatsOpts{
 		Limit:              input.Limit,
 		Page:               input.Page,
@@ -297,62 +332,71 @@ func (s *Server) handleListChats(ctx context.Context, req *mcp.CallToolRequest, 
 
 	result, err := s.store.ListChats(opts)
 	if err != nil {
-		return nil, nil, err
+		return nil, chatsResult{}, err
 	}
-	return nil, result, nil
+	if result == nil {
+		result = []db.ChatDict{}
+	}
+	return nil, chatsResult{Chats: result, Count: len(result)}, nil
 }
 
-func (s *Server) handleGetChat(ctx context.Context, req *mcp.CallToolRequest, input getChatInput) (*mcp.CallToolResult, *db.ChatDict, error) {
+func (s *Server) handleGetChat(ctx context.Context, req *mcp.CallToolRequest, input getChatInput) (*mcp.CallToolResult, chatResult, error) {
 	includeLastMsg := true
 	if input.IncludeLastMessage != nil {
 		includeLastMsg = *input.IncludeLastMessage
 	}
 	result, err := s.store.GetChat(input.ChatJID, includeLastMsg)
 	if err != nil {
-		return nil, nil, err
+		return nil, chatResult{}, err
 	}
 	if result == nil {
-		return nil, nil, fmt.Errorf("chat not found: %s", input.ChatJID)
+		return nil, chatResult{}, fmt.Errorf("chat not found: %s", input.ChatJID)
 	}
-	return nil, result, nil
+	return nil, chatResult{Chat: *result}, nil
 }
 
-func (s *Server) handleGetDirectChatByContact(ctx context.Context, req *mcp.CallToolRequest, input getDirectChatByContactInput) (*mcp.CallToolResult, *db.ChatDict, error) {
+func (s *Server) handleGetDirectChatByContact(ctx context.Context, req *mcp.CallToolRequest, input getDirectChatByContactInput) (*mcp.CallToolResult, chatResult, error) {
 	result, err := s.store.GetDirectChatByContact(input.SenderPhoneNumber)
 	if err != nil {
-		return nil, nil, err
+		return nil, chatResult{}, err
 	}
 	if result == nil {
-		return nil, nil, fmt.Errorf("no direct chat found for: %s", input.SenderPhoneNumber)
+		return nil, chatResult{}, fmt.Errorf("no direct chat found for: %s", input.SenderPhoneNumber)
 	}
-	return nil, result, nil
+	return nil, chatResult{Chat: *result}, nil
 }
 
-func (s *Server) handleGetContactChats(ctx context.Context, req *mcp.CallToolRequest, input getContactChatsInput) (*mcp.CallToolResult, []db.ChatDict, error) {
+func (s *Server) handleGetContactChats(ctx context.Context, req *mcp.CallToolRequest, input getContactChatsInput) (*mcp.CallToolResult, chatsResult, error) {
 	result, err := s.store.GetContactChats(input.JID, input.Limit, input.Page)
 	if err != nil {
-		return nil, nil, err
-	}
-	return nil, result, nil
-}
-
-func (s *Server) handleGetLastInteraction(ctx context.Context, req *mcp.CallToolRequest, input getLastInteractionInput) (*mcp.CallToolResult, *db.MessageDict, error) {
-	result, err := s.store.GetLastInteraction(input.JID)
-	if err != nil {
-		return nil, nil, err
+		return nil, chatsResult{}, err
 	}
 	if result == nil {
-		return nil, nil, fmt.Errorf("no interaction found for: %s", input.JID)
+		result = []db.ChatDict{}
 	}
-	return nil, result, nil
+	return nil, chatsResult{Chats: result, Count: len(result)}, nil
 }
 
-func (s *Server) handleGetMessageContext(ctx context.Context, req *mcp.CallToolRequest, input getMessageContextInput) (*mcp.CallToolResult, *db.MessageContextDict, error) {
+func (s *Server) handleGetLastInteraction(ctx context.Context, req *mcp.CallToolRequest, input getLastInteractionInput) (*mcp.CallToolResult, messageResult, error) {
+	result, err := s.store.GetLastInteraction(input.JID)
+	if err != nil {
+		return nil, messageResult{}, err
+	}
+	if result == nil {
+		return nil, messageResult{}, fmt.Errorf("no interaction found for: %s", input.JID)
+	}
+	return nil, messageResult{Message: *result}, nil
+}
+
+func (s *Server) handleGetMessageContext(ctx context.Context, req *mcp.CallToolRequest, input getMessageContextInput) (*mcp.CallToolResult, messageContextResult, error) {
 	result, err := s.store.GetMessageContext(input.MessageID, input.Before, input.After)
 	if err != nil {
-		return nil, nil, err
+		return nil, messageContextResult{}, err
 	}
-	return nil, result, nil
+	if result == nil {
+		return nil, messageContextResult{}, fmt.Errorf("message not found: %s", input.MessageID)
+	}
+	return nil, messageContextResult{Context: *result}, nil
 }
 
 type sendResult struct {
