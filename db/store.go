@@ -63,7 +63,7 @@ func NewStore(storeDir string) (*Store, error) {
 
 	// Open whatsmeow database (read-only for contact resolution)
 	waPath := filepath.Join(storeDir, "whatsapp.db")
-	waDB, err := sql.Open("sqlite3", "file:"+waPath+"?mode=ro&_journal_mode=WAL")
+	waDB, err := sql.Open("sqlite3", "file:"+waPath+"?_journal_mode=WAL")
 	if err != nil {
 		// Not fatal - whatsmeow DB may not exist yet on first run
 		fmt.Fprintf(os.Stderr, "Warning: could not open whatsmeow DB: %v\n", err)
