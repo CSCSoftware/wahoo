@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // Store manages both the messages DB (our data) and the whatsmeow DB (session/contacts).
@@ -25,7 +25,7 @@ func NewStore(storeDir string) (*Store, error) {
 
 	// Open messages database
 	msgPath := filepath.Join(storeDir, "messages.db")
-	msgDB, err := sql.Open("sqlite3", "file:"+msgPath+"?_foreign_keys=on&_journal_mode=WAL")
+	msgDB, err := sql.Open("sqlite", "file:"+msgPath+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open messages database: %v", err)
 	}
@@ -63,7 +63,7 @@ func NewStore(storeDir string) (*Store, error) {
 
 	// Open whatsmeow database (read-only for contact resolution)
 	waPath := filepath.Join(storeDir, "whatsapp.db")
-	waDB, err := sql.Open("sqlite3", "file:"+waPath+"?_journal_mode=WAL")
+	waDB, err := sql.Open("sqlite", "file:"+waPath+"?_pragma=journal_mode(WAL)")
 	if err != nil {
 		// Not fatal - whatsmeow DB may not exist yet on first run
 		fmt.Fprintf(os.Stderr, "Warning: could not open whatsmeow DB: %v\n", err)

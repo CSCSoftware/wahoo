@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 	"github.com/mdp/qrterminal"
 
 	"github.com/CSCSoftware/wahoo/db"
@@ -35,7 +35,7 @@ func NewClient(store *db.Store, storeDir string) (*Client, error) {
 	// Open whatsmeow session container
 	dbPath := filepath.Join(storeDir, "whatsapp.db")
 	dbLog := waLog.Stdout("Database", "INFO", true)
-	container, err := sqlstore.New(context.Background(), "sqlite3", "file:"+dbPath+"?_foreign_keys=on", dbLog)
+	container, err := sqlstore.New(context.Background(), "sqlite", "file:"+dbPath+"?_pragma=foreign_keys(1)", dbLog)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open whatsmeow DB: %w", err)
 	}
