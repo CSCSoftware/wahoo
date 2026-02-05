@@ -210,9 +210,9 @@ func (c *Client) DeleteChat(chatJID string) (bool, string) {
 		return false, fmt.Sprintf("Failed to delete chat: %v", err)
 	}
 
-	// Also remove from local DB
-	c.Store.MsgDB.Exec("DELETE FROM messages WHERE chat_jid = ?", chatJID)
-	c.Store.MsgDB.Exec("DELETE FROM chats WHERE jid = ?", chatJID)
+	// Also remove from local DB (ignore errors - best effort cleanup)
+	_, _ = c.Store.MsgDB.Exec("DELETE FROM messages WHERE chat_jid = ?", chatJID)
+	_, _ = c.Store.MsgDB.Exec("DELETE FROM chats WHERE jid = ?", chatJID)
 
 	return true, fmt.Sprintf("Chat %s deleted", chatJID)
 }

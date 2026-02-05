@@ -10,7 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// registerTools registers all 19 WhatsApp MCP tools.
+// registerTools registers all 21 WhatsApp MCP tools.
 func (s *Server) registerTools() {
 	// === Read-only DB tools (no WhatsApp client needed) ===
 

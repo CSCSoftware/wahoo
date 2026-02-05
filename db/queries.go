@@ -57,6 +57,42 @@ type rawMessage struct {
 	mediaType sql.NullString
 }
 
+// rawChat holds scanned chat data before conversion to ChatDict
+type rawChat struct {
+	jid          string
+	name         sql.NullString
+	lastTime     sql.NullString
+	lastMsg      sql.NullString
+	lastSender   sql.NullString
+	lastIsFromMe sql.NullBool
+}
+
+// toDict converts rawChat to ChatDict with resolved last sender.
+func (r rawChat) toDict(cache map[string]string) ChatDict {
+	d := ChatDict{
+		JID:     r.jid,
+		IsGroup: strings.HasSuffix(r.jid, "@g.us"),
+	}
+	if r.name.Valid {
+		d.Name = &r.name.String
+	}
+	if r.lastTime.Valid {
+		d.LastMessageTime = &r.lastTime.String
+	}
+	if r.lastMsg.Valid {
+		d.LastMessage = &r.lastMsg.String
+	}
+	if r.lastSender.Valid {
+		senderName := resolveMessageSender(r.lastSender.String, r.lastIsFromMe.Valid && r.lastIsFromMe.Bool, cache)
+		d.LastSender = &senderName
+	}
+	if r.lastIsFromMe.Valid {
+		v := r.lastIsFromMe.Bool
+		d.LastIsFromMe = &v
+	}
+	return d
+}
+
 // BuildSenderCache builds a JID -> display name lookup from both databases.
 // Priority: whatsmeow contacts > chats table (chats often store phone numbers as names).
 func (s *Store) BuildSenderCache() map[string]string {
@@ -144,14 +180,10 @@ func resolveSender(senderJID string, cache map[string]string) string {
 
 // rawToDict converts a raw DB row to a MessageDict with resolved sender.
 func rawToDict(r rawMessage, cache map[string]string) MessageDict {
-	sender := "Me"
-	if !r.isFromMe {
-		sender = resolveSender(r.sender, cache)
-	}
 	d := MessageDict{
 		ID:        r.id,
 		Timestamp: r.timestamp,
-		Sender:    sender,
+		Sender:    resolveMessageSender(r.sender, r.isFromMe, cache),
 		SenderJID: r.sender,
 		Content:   r.content.String,
 		IsFromMe:  r.isFromMe,
@@ -164,6 +196,14 @@ func rawToDict(r rawMessage, cache map[string]string) MessageDict {
 		d.MediaType = &r.mediaType.String
 	}
 	return d
+}
+
+// resolveMessageSender resolves a sender JID to a display name, handling "Me" for own messages.
+func resolveMessageSender(senderJID string, isFromMe bool, cache map[string]string) string {
+	if isFromMe {
+		return "Me"
+	}
+	return resolveSender(senderJID, cache)
 }
 
 // ListMessagesOpts holds parameters for ListMessages.
@@ -485,44 +525,11 @@ func (s *Store) ListChats(opts ListChatsOpts) ([]ChatDict, error) {
 	var result []ChatDict
 
 	for rows.Next() {
-		var jid string
-		var name sql.NullString
-		var lastTime sql.NullString
-		var lastMsg, lastSender sql.NullString
-		var lastIsFromMe sql.NullBool
-
-		if err := rows.Scan(&jid, &name, &lastTime, &lastMsg, &lastSender, &lastIsFromMe); err != nil {
+		var r rawChat
+		if err := rows.Scan(&r.jid, &r.name, &r.lastTime, &r.lastMsg, &r.lastSender, &r.lastIsFromMe); err != nil {
 			return nil, fmt.Errorf("scan chat: %w", err)
 		}
-
-		d := ChatDict{
-			JID:     jid,
-			IsGroup: strings.HasSuffix(jid, "@g.us"),
-		}
-		if name.Valid {
-			d.Name = &name.String
-		}
-		if lastTime.Valid {
-			d.LastMessageTime = &lastTime.String
-		}
-		if lastMsg.Valid {
-			d.LastMessage = &lastMsg.String
-		}
-		if lastSender.Valid {
-			senderName := lastSender.String
-			if lastIsFromMe.Valid && lastIsFromMe.Bool {
-				senderName = "Me"
-			} else {
-				senderName = resolveSender(senderName, cache)
-			}
-			d.LastSender = &senderName
-		}
-		if lastIsFromMe.Valid {
-			v := lastIsFromMe.Bool
-			d.LastIsFromMe = &v
-		}
-
-		result = append(result, d)
+		result = append(result, r.toDict(cache))
 	}
 
 	if result == nil {
@@ -586,13 +593,8 @@ func (s *Store) GetChat(chatJID string, includeLastMessage bool) (*ChatDict, err
 	}
 	q += " WHERE c.jid = ?"
 
-	var jid string
-	var name sql.NullString
-	var lastTime sql.NullString
-	var lastMsg, lastSender sql.NullString
-	var lastIsFromMe sql.NullBool
-
-	err := s.MsgDB.QueryRow(q, chatJID).Scan(&jid, &name, &lastTime, &lastMsg, &lastSender, &lastIsFromMe)
+	var r rawChat
+	err := s.MsgDB.QueryRow(q, chatJID).Scan(&r.jid, &r.name, &r.lastTime, &r.lastMsg, &r.lastSender, &r.lastIsFromMe)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -601,33 +603,7 @@ func (s *Store) GetChat(chatJID string, includeLastMessage bool) (*ChatDict, err
 	}
 
 	cache := s.BuildSenderCache()
-	d := ChatDict{
-		JID:     jid,
-		IsGroup: strings.HasSuffix(jid, "@g.us"),
-	}
-	if name.Valid {
-		d.Name = &name.String
-	}
-	if lastTime.Valid {
-		d.LastMessageTime = &lastTime.String
-	}
-	if lastMsg.Valid {
-		d.LastMessage = &lastMsg.String
-	}
-	if lastSender.Valid {
-		senderName := lastSender.String
-		if lastIsFromMe.Valid && lastIsFromMe.Bool {
-			senderName = "Me"
-		} else {
-			senderName = resolveSender(senderName, cache)
-		}
-		d.LastSender = &senderName
-	}
-	if lastIsFromMe.Valid {
-		v := lastIsFromMe.Bool
-		d.LastIsFromMe = &v
-	}
-
+	d := r.toDict(cache)
 	return &d, nil
 }
 
@@ -640,13 +616,8 @@ func (s *Store) GetDirectChatByContact(phoneNumber string) (*ChatDict, error) {
 		  WHERE c.jid LIKE ? AND c.jid NOT LIKE '%@g.us'
 		  LIMIT 1`
 
-	var jid string
-	var name sql.NullString
-	var lastTime sql.NullString
-	var lastMsg, lastSender sql.NullString
-	var lastIsFromMe sql.NullBool
-
-	err := s.MsgDB.QueryRow(q, "%"+phoneNumber+"%").Scan(&jid, &name, &lastTime, &lastMsg, &lastSender, &lastIsFromMe)
+	var r rawChat
+	err := s.MsgDB.QueryRow(q, "%"+phoneNumber+"%").Scan(&r.jid, &r.name, &r.lastTime, &r.lastMsg, &r.lastSender, &r.lastIsFromMe)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -655,33 +626,7 @@ func (s *Store) GetDirectChatByContact(phoneNumber string) (*ChatDict, error) {
 	}
 
 	cache := s.BuildSenderCache()
-	d := ChatDict{
-		JID:     jid,
-		IsGroup: strings.HasSuffix(jid, "@g.us"),
-	}
-	if name.Valid {
-		d.Name = &name.String
-	}
-	if lastTime.Valid {
-		d.LastMessageTime = &lastTime.String
-	}
-	if lastMsg.Valid {
-		d.LastMessage = &lastMsg.String
-	}
-	if lastSender.Valid {
-		senderName := lastSender.String
-		if lastIsFromMe.Valid && lastIsFromMe.Bool {
-			senderName = "Me"
-		} else {
-			senderName = resolveSender(senderName, cache)
-		}
-		d.LastSender = &senderName
-	}
-	if lastIsFromMe.Valid {
-		v := lastIsFromMe.Bool
-		d.LastIsFromMe = &v
-	}
-
+	d := r.toDict(cache)
 	return &d, nil
 }
 
@@ -710,44 +655,11 @@ func (s *Store) GetContactChats(jid string, limit, page int) ([]ChatDict, error)
 	var result []ChatDict
 
 	for rows.Next() {
-		var chatJID string
-		var name sql.NullString
-		var lastTime sql.NullString
-		var lastMsg, lastSender sql.NullString
-		var lastIsFromMe sql.NullBool
-
-		if err := rows.Scan(&chatJID, &name, &lastTime, &lastMsg, &lastSender, &lastIsFromMe); err != nil {
+		var r rawChat
+		if err := rows.Scan(&r.jid, &r.name, &r.lastTime, &r.lastMsg, &r.lastSender, &r.lastIsFromMe); err != nil {
 			continue
 		}
-
-		d := ChatDict{
-			JID:     chatJID,
-			IsGroup: strings.HasSuffix(chatJID, "@g.us"),
-		}
-		if name.Valid {
-			d.Name = &name.String
-		}
-		if lastTime.Valid {
-			d.LastMessageTime = &lastTime.String
-		}
-		if lastMsg.Valid {
-			d.LastMessage = &lastMsg.String
-		}
-		if lastSender.Valid {
-			senderName := lastSender.String
-			if lastIsFromMe.Valid && lastIsFromMe.Bool {
-				senderName = "Me"
-			} else {
-				senderName = resolveSender(senderName, cache)
-			}
-			d.LastSender = &senderName
-		}
-		if lastIsFromMe.Valid {
-			v := lastIsFromMe.Bool
-			d.LastIsFromMe = &v
-		}
-
-		result = append(result, d)
+		result = append(result, r.toDict(cache))
 	}
 
 	if result == nil {

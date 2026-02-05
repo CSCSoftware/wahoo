@@ -137,21 +137,8 @@ func handleHistorySync(c *Client, historySync *events.HistorySync) {
 				continue
 			}
 
-			var content string
-			if msg.Message.Message != nil {
-				if conv := msg.Message.Message.GetConversation(); conv != "" {
-					content = conv
-				} else if ext := msg.Message.Message.GetExtendedTextMessage(); ext != nil {
-					content = ext.GetText()
-				}
-			}
-
-			var mediaType, filename, url string
-			var mediaKey, fileSHA256, fileEncSHA256 []byte
-			var fileLength uint64
-			if msg.Message.Message != nil {
-				mediaType, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength = extractMediaInfo(msg.Message.Message)
-			}
+			content := extractTextContent(msg.Message.Message)
+			mediaType, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength := extractMediaInfo(msg.Message.Message)
 
 			if content == "" && mediaType == "" {
 				continue
