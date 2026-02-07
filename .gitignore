@@ -2,3 +2,7 @@ store/
 wahoo.exe
 *.exe
 .aidex/
+
+# Internal docs and scripts
+.claude/
+build.bat
