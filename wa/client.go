@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -19,6 +20,44 @@ import (
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
+// stderrLogger implements waLog.Logger but writes to stderr instead of stdout.
+type stderrLogger struct {
+	module   string
+	minLevel int
+	color    bool
+}
+
+var levelMap = map[string]int{"DEBUG": 0, "INFO": 1, "WARN": 2, "ERROR": 3}
+
+func newStderrLogger(module, minLevel string, color bool) waLog.Logger {
+	lvl, ok := levelMap[strings.ToUpper(minLevel)]
+	if !ok {
+		lvl = 1
+	}
+	return &stderrLogger{module: module, minLevel: lvl, color: color}
+}
+
+func (l *stderrLogger) log(level string, lvl int, msg string, args ...interface{}) {
+	if lvl < l.minLevel {
+		return
+	}
+	text := fmt.Sprintf(msg, args...)
+	if l.color {
+		colors := map[string]string{"DEBUG": "\033[37m", "INFO": "\033[36m", "WARN": "\033[33m", "ERROR": "\033[31m"}
+		fmt.Fprintf(os.Stderr, "%s%s [%s %s] %s\033[0m\n", colors[level], time.Now().Format("15:04:05.000"), l.module, level, text)
+	} else {
+		fmt.Fprintf(os.Stderr, "%s [%s %s] %s\n", time.Now().Format("15:04:05.000"), l.module, level, text)
+	}
+}
+
+func (l *stderrLogger) Debugf(msg string, args ...interface{}) { l.log("DEBUG", 0, msg, args...) }
+func (l *stderrLogger) Infof(msg string, args ...interface{})  { l.log("INFO", 1, msg, args...) }
+func (l *stderrLogger) Warnf(msg string, args ...interface{})  { l.log("WARN", 2, msg, args...) }
+func (l *stderrLogger) Errorf(msg string, args ...interface{}) { l.log("ERROR", 3, msg, args...) }
+func (l *stderrLogger) Sub(module string) waLog.Logger {
+	return &stderrLogger{module: l.module + "/" + module, minLevel: l.minLevel, color: l.color}
+}
+
 // Client wraps the whatsmeow client and our message store.
 type Client struct {
 	WA       *whatsmeow.Client
@@ -30,11 +69,11 @@ type Client struct {
 // NewClient creates a new WhatsApp client and connects to the whatsmeow session DB.
 func NewClient(store *db.Store, storeDir string) (*Client, error) {
 	// All whatsmeow logs go to stderr (stdout is for MCP)
-	logger := waLog.Stdout("WhatsApp", "INFO", true)
+	logger := newStderrLogger("WhatsApp", "INFO", true)
 
 	// Open whatsmeow session container
 	dbPath := filepath.Join(storeDir, "whatsapp.db")
-	dbLog := waLog.Stdout("Database", "INFO", true)
+	dbLog := newStderrLogger("Database", "INFO", true)
 	container, err := sqlstore.New(context.Background(), "sqlite", "file:"+dbPath+"?_pragma=foreign_keys(1)", dbLog)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open whatsmeow DB: %w", err)
